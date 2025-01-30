@@ -1,35 +1,59 @@
-import {Component, viewChild} from '@angular/core';
-import {MatFormField} from '@angular/material/form-field';
-import {MatInput} from '@angular/material/input';
-import {MatButton} from '@angular/material/button';
-import {ChatbotService} from '../../services/chatbot.service';
-import {FormsModule, NgForm} from '@angular/forms';
+import { Component } from '@angular/core';
+import { MatFormField, MatFormFieldModule } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { MatButton } from '@angular/material/button';
+import { ChatbotService } from '@/app/services/chatbot.service';
+import { FormsModule, NgForm } from '@angular/forms';
 
 @Component({
   selector: 'app-prompt-bar',
-  imports: [
-    MatInput,
-    MatFormField,
-    MatButton,
-    FormsModule
-  ],
+  imports: [MatInput, MatFormField, MatButton, FormsModule, MatFormFieldModule],
+  styles: `
+    form {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    .input {
+      width: 100%;
+    }
+  `,
   template: `
     <form #form="ngForm" (submit)="onSubmit(form)">
-      <mat-form-field class="example-full-width">
-        <input matInput placeholder="Type message..." name="prompt" ngModel>
+      <mat-form-field class="input">
+        <textarea
+          matInput
+          placeholder="Type message..."
+          name="prompt"
+          ngModel
+        ></textarea>
       </mat-form-field>
-      <button mat-button>Wyślij</button>
+      @if (chatbotService.isTypingMessage) {
+        <button
+          mat-button
+          type="button"
+          (click)="this.chatbotService.cancelResponse()"
+        >
+          Reset
+        </button>
+      } @else {
+        <button mat-button>Wyślij</button>
+      }
     </form>
   `
 })
-
 export class PromptBarComponent {
-  constructor(protected chatbotService: ChatbotService) {
-  }
+  protected readonly NgForm = NgForm;
+
+  constructor(protected chatbotService: ChatbotService) {}
 
   public onSubmit(ev: NgForm) {
     const prompt = ev.value.prompt;
-    if(!prompt) return;
+    if (!prompt) return;
 
     this.chatbotService.sendPromptAndGetResponse(prompt);
 
