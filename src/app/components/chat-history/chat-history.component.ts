@@ -27,6 +27,8 @@ export class ChatHistoryComponent implements AfterViewInit {
   constructor(protected chatbotService: ChatbotService) {}
 
   ngAfterViewInit(): void {
-    this.chatbotService.fetchMessages();
+    setTimeout(() => {
+      this.chatbotService.fetchMessages();
+    }, 500);
   }
 }

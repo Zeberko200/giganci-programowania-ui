@@ -55,7 +55,7 @@ export class PromptBarComponent {
     const prompt = ev.value.prompt;
     if (!prompt) return;
 
-    this.chatbotService.sendPromptAndGetResponse(prompt);
+    this.chatbotService.sendPromptAndStreamResponse(prompt);
 
     ev.reset();
   }

@@ -1,8 +1,8 @@
 import { Injectable, NgZone, OnDestroy } from '@angular/core';
-import { SseService } from '@/app/services/sse.service';
 import { HttpClient } from '@angular/common/http';
-import { Message } from '@/app/types';
+import { Message, SrStreamMessage } from '@/app/types';
 import { environment } from '@/environment';
+import { SignalRService } from '@/app/services/signalr.service';
 
 @Injectable({
   providedIn: 'root'
@@ -12,25 +12,35 @@ export class ChatbotService implements OnDestroy {
   public messages: Message[] = [];
 
   private currentTypingMessageId: string | null = null;
-  private eventSource: EventSource | null = null;
 
   constructor(
-    private sseService: SseService,
+    private signalRService: SignalRService,
     private http: HttpClient,
     private ngZone: NgZone
-  ) {}
+  ) {
+    this.signalRService
+      .startConnection(`${environment.apiUrl}/ChatbotHub`)
+      .then()
+      .then(() => {
+        console.log('Connection has been open!');
+      });
+  }
 
-  public sendPromptAndGetResponse(message: string) {
+  async ngOnDestroy() {
+    await this.cancelResponse();
+  }
+
+  public sendPromptAndStreamResponse(message: string) {
     this.http
-      .post<Message>(`${environment.apiUrl}/messages/send-message`, {
+      .post<Message>(`${environment.apiUrl}/api/messages/send-message`, {
         message
       })
       .subscribe((messageObj) => {
         this.ngZone.run(() => {
           this.messages.push(messageObj);
-        });
 
-        this.getResponse(messageObj.id as string);
+          this.getResponse(messageObj.id as string);
+        });
       });
   }
 
@@ -38,7 +48,7 @@ export class ChatbotService implements OnDestroy {
     this.http
       .get<{
         messages: Message[];
-      }>(`${environment.apiUrl}/messages/get-messages`)
+      }>(`${environment.apiUrl}/api/messages/get-messages`)
       .subscribe((data) => {
         this.ngZone.run(() => {
           this.messages = data.messages;
@@ -46,9 +56,8 @@ export class ChatbotService implements OnDestroy {
       });
   }
 
-  public cancelResponse() {
-    this.eventSource?.close();
-    // this.typingMessage = '';
+  public async cancelResponse() {
+    await this.signalRService.stopConnection();
     this.ngZone.run(() => {
       this.isTypingMessage = false;
     });
@@ -56,7 +65,7 @@ export class ChatbotService implements OnDestroy {
 
   public rateMessage(messageId: string, rate: number) {
     this.http
-      .post<Message>(`${environment.apiUrl}/messages/rate-message`, {
+      .post<Message>(`${environment.apiUrl}/api/messages/rate-message`, {
         messageId,
         rate
       })
@@ -70,54 +79,43 @@ export class ChatbotService implements OnDestroy {
       });
   }
 
-  ngOnDestroy(): void {
-    this.cancelResponse();
-  }
-
   private getResponse(messageId: string) {
-    const { eventSource, observable } = this.sseService.getStream<string>(
-      `${environment.apiUrl}/messages/generate-response/${messageId}`,
-      {
-        eventName: 'message-sending-start',
-        handler: ({ data }) => {
-          this.ngZone.run(() => {
-            const initMessage = JSON.parse(data);
-            this.messages.push(initMessage);
-
-            this.currentTypingMessageId = initMessage.id;
-            this.isTypingMessage = true;
-          });
-        }
-      },
-      {
-        eventName: 'data',
-        handler: ({ data }) => {
-          this.ngZone.run(() => {
-            const messageIndex = this.messages.findIndex(
-              (p) => p.id === this.currentTypingMessageId
-            );
-            const mess = this.messages[messageIndex];
-
-            mess.content = `${mess.content} ${data}`;
-          });
-        }
-      },
-      {
-        eventName: 'message-sending-end',
-        handler: ({ data }) => {
-          this.ngZone.run(() => {
-            const messageIndex = this.messages.findIndex(
-              (p) => p.id === this.currentTypingMessageId
-            );
-            this.messages[messageIndex] = JSON.parse(data);
-            this.currentTypingMessageId = null;
-            this.isTypingMessage = false;
-          });
-        }
-      }
-    );
-
-    observable.subscribe();
-    this.eventSource = eventSource;
+    this.signalRService
+      .ensureConnection(`${environment.apiUrl}/ChatbotHub`)
+      .then(() => {
+        this.signalRService.getStream<string>(
+          'GenerateResponse',
+          [messageId] as unknown[],
+          (mess: SrStreamMessage<string>) => {
+            this.ngZone.run(() => {
+              switch (mess.type) {
+                case 'init': {
+                  this.messages.push(JSON.parse(mess.data));
+                  this.currentTypingMessageId = JSON.parse(mess.data).id;
+                  this.isTypingMessage = true;
+                  break;
+                }
+                case 'data': {
+                  const messageIndex = this.messages.findIndex(
+                    (p) => p.id === this.currentTypingMessageId
+                  );
+                  const message = this.messages[messageIndex];
+                  message.content = `${message.content} ${mess.data}`;
+                  break;
+                }
+                case 'complete': {
+                  const messageIndex = this.messages.findIndex(
+                    (p) => p.id === this.currentTypingMessageId
+                  );
+                  this.messages[messageIndex] = JSON.parse(mess.data);
+                  this.currentTypingMessageId = null;
+                  this.isTypingMessage = false;
+                  break;
+                }
+              }
+            });
+          }
+        );
+      });
   }
 }
